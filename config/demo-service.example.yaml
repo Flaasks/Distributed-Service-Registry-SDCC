@@ -1,0 +1,13 @@
+service:
+  id: users-api-1
+  name: users-api
+  version: v1.0.0
+  endpoint: users-api-1:8080
+  health_init: HEALTH_STATUS_SERVING
+
+registry:
+  endpoints:
+    - registry-node-1:50051
+    - registry-node-2:50051
+    - registry-node-3:50051
+  heartbeat_interval_seconds: 4
