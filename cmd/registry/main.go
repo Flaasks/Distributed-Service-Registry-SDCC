@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/Flaasks/distributed-service-registry/internal/config"
+	"github.com/Flaasks/distributed-service-registry/internal/gossip"
 	"github.com/Flaasks/distributed-service-registry/internal/registry"
 	"github.com/Flaasks/distributed-service-registry/internal/storage"
 	apiv1 "github.com/Flaasks/distributed-service-registry/pkg/api"
@@ -32,16 +33,21 @@ func main() {
 	}
 
 	store := storage.NewServiceStore()
+	peerStore := storage.NewPeerStore()
+	peerStore.UpsertSelf(cfg.Node.ID, cfg.Node.AdvertiseAddress, time.Now().Unix())
+
 	serviceServer := registry.NewServiceRegistryServer(
 		store,
 		cfg.Node.ID,
 		time.Duration(cfg.Service.HeartbeatTTLSeconds)*time.Second,
 	)
-	peerServer := registry.NewRegistryPeerServer(store, cfg.Node.ID, cfg.Node.AdvertiseAddress)
+	peerServer := registry.NewRegistryPeerServer(store, peerStore, cfg.Node.ID, cfg.Node.AdvertiseAddress)
+	gossipRuntime := gossip.NewRuntime(cfg, store, peerStore)
 
 	grpcServer := grpc.NewServer()
 	apiv1.RegisterServiceRegistryServer(grpcServer, serviceServer)
 	apiv1.RegisterRegistryPeerServer(grpcServer, peerServer)
+	gossipRuntime.Start()
 
 	log.Printf(
 		"registry node starting: node_id=%s listen=%s advertise=%s seed_peers=%d",
@@ -63,9 +69,12 @@ func main() {
 
 	select {
 	case err := <-serveErr:
-		log.Fatalf("grpc server failed: %v", err)
+		log.Printf("grpc server failed: %v", err)
+		gossipRuntime.Stop()
+		os.Exit(1)
 	case sig := <-signalCh:
 		log.Printf("shutdown signal received: %s", sig.String())
+		gossipRuntime.Stop()
 		grpcServer.GracefulStop()
 		log.Printf("registry node stopped")
 	}

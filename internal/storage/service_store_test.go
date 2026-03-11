@@ -99,3 +99,92 @@ func TestServiceStoreHeartbeatStaleAndRemove(t *testing.T) {
 		t.Fatalf("expected second remove to return false")
 	}
 }
+
+func TestServiceStoreMergeRemoteConflictResolution(t *testing.T) {
+	store := NewServiceStore()
+	store.Upsert(&apiv1.ServiceRecord{
+		ServiceName:       "payments",
+		ServiceId:         "p1",
+		Endpoint:          "payments-local:8080",
+		Version:           "v1",
+		HealthStatus:      apiv1.HealthStatus_HEALTH_STATUS_SERVING,
+		LastHeartbeatUnix: 100,
+		UpdatedAtUnix:     100,
+		OwnerNodeId:       "node-a",
+		LogicalVersion:    1,
+	})
+
+	merged := store.MergeRemote([]*apiv1.ServiceRecord{
+		{
+			ServiceName:       "payments",
+			ServiceId:         "p1",
+			Endpoint:          "payments-remote:8080",
+			Version:           "v2",
+			HealthStatus:      apiv1.HealthStatus_HEALTH_STATUS_DEGRADED,
+			LastHeartbeatUnix: 101,
+			UpdatedAtUnix:     101,
+			OwnerNodeId:       "node-b",
+			LogicalVersion:    2,
+		},
+	})
+	if merged != 1 {
+		t.Fatalf("expected one merged record, got %d", merged)
+	}
+
+	afterMerge := store.Get("payments", "p1")
+	if len(afterMerge) != 1 || afterMerge[0].GetEndpoint() != "payments-remote:8080" {
+		t.Fatalf("expected remote endpoint to win on higher version")
+	}
+
+	mergedOlder := store.MergeRemote([]*apiv1.ServiceRecord{
+		{
+			ServiceName:       "payments",
+			ServiceId:         "p1",
+			Endpoint:          "payments-old:8080",
+			Version:           "v0",
+			HealthStatus:      apiv1.HealthStatus_HEALTH_STATUS_NOT_SERVING,
+			LastHeartbeatUnix: 200,
+			UpdatedAtUnix:     200,
+			OwnerNodeId:       "node-c",
+			LogicalVersion:    1,
+		},
+	})
+	if mergedOlder != 0 {
+		t.Fatalf("expected older logical version to be ignored")
+	}
+
+	stillRemote := store.Get("payments", "p1")
+	if len(stillRemote) != 1 || stillRemote[0].GetEndpoint() != "payments-remote:8080" {
+		t.Fatalf("expected endpoint to remain payments-remote:8080")
+	}
+}
+
+func TestServiceStoreListSince(t *testing.T) {
+	store := NewServiceStore()
+	store.Upsert(&apiv1.ServiceRecord{
+		ServiceName:       "catalog",
+		ServiceId:         "c1",
+		Endpoint:          "catalog-1:8080",
+		Version:           "v1",
+		HealthStatus:      apiv1.HealthStatus_HEALTH_STATUS_SERVING,
+		LastHeartbeatUnix: 10,
+		UpdatedAtUnix:     10,
+	})
+	store.Upsert(&apiv1.ServiceRecord{
+		ServiceName:       "catalog",
+		ServiceId:         "c2",
+		Endpoint:          "catalog-2:8080",
+		Version:           "v1",
+		HealthStatus:      apiv1.HealthStatus_HEALTH_STATUS_SERVING,
+		LastHeartbeatUnix: 20,
+		UpdatedAtUnix:     20,
+	})
+
+	recent := store.ListSince(15)
+	if len(recent) != 1 {
+		t.Fatalf("expected one recent record, got %d", len(recent))
+	}
+	if recent[0].GetServiceId() != "c2" {
+		t.Fatalf("expected c2 to be returned by since filter")
+	}
+}
