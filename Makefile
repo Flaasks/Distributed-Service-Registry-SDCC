@@ -19,7 +19,7 @@ else
 PROTOC_CMD :=
 endif
 
-.PHONY: tools protoc-local proto tidy build test
+.PHONY: tools protoc-local proto tidy build test run-registry run-demo compose-up compose-down lint
 
 tools:
 	$(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@v1.35.1
@@ -49,3 +49,19 @@ build:
 
 test:
 	$(GO) test ./...
+
+run-registry:
+	$(GO) run ./cmd/registry -config config/registry.example.yaml
+
+run-demo:
+	$(GO) run ./cmd/demo-service -config config/demo-service.example.yaml
+
+compose-up:
+	docker compose up --build
+
+compose-down:
+	docker compose down --remove-orphans
+
+lint:
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not found. Install from https://golangci-lint.run/welcome/install/"; exit 1; }
+	golangci-lint run ./...

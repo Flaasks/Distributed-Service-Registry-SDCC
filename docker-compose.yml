@@ -1,0 +1,46 @@
+services:
+  registry-node-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.registry
+    container_name: registry-node-1
+    command: ["-config", "/app/config/registry.node-1.yaml"]
+    ports:
+      - "50051:50051"
+    networks:
+      - registry-net
+
+  registry-node-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.registry
+    container_name: registry-node-2
+    command: ["-config", "/app/config/registry.node-2.yaml"]
+    networks:
+      - registry-net
+
+  registry-node-3:
+    build:
+      context: .
+      dockerfile: Dockerfile.registry
+    container_name: registry-node-3
+    command: ["-config", "/app/config/registry.node-3.yaml"]
+    networks:
+      - registry-net
+
+  demo-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo-service
+    container_name: demo-service
+    command: ["-config", "/app/config/demo-service.docker.yaml"]
+    depends_on:
+      - registry-node-1
+      - registry-node-2
+      - registry-node-3
+    networks:
+      - registry-net
+
+networks:
+  registry-net:
+    driver: bridge

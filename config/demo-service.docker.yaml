@@ -1,0 +1,13 @@
+service:
+  id: demo-service-1
+  name: demo-service
+  version: v1.0.0
+  endpoint: demo-service:8080
+  health_init: HEALTH_STATUS_SERVING
+
+registry:
+  endpoints:
+    - registry-node-1:50051
+    - registry-node-2:50051
+    - registry-node-3:50051
+  heartbeat_interval_seconds: 4
