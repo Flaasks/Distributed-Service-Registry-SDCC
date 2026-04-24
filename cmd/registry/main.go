@@ -75,6 +75,7 @@ func main() {
 	case sig := <-signalCh:
 		log.Printf("shutdown signal received: %s", sig.String())
 		gossipRuntime.Stop()
+		gossipRuntime.GracefulLeave()
 		grpcServer.GracefulStop()
 		log.Printf("registry node stopped")
 	}

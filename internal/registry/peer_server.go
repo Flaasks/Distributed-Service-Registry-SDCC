@@ -75,6 +75,23 @@ func (s *RegistryPeerServer) GossipSync(_ context.Context, req *apiv1.GossipSync
 	}, nil
 }
 
+func (s *RegistryPeerServer) LeaveCluster(_ context.Context, req *apiv1.JoinClusterRequest) (*apiv1.GossipSyncResponse, error) {
+	if req == nil || req.GetNode() == nil {
+		return nil, status.Error(codes.InvalidArgument, "node is required")
+	}
+
+	nodeID := strings.TrimSpace(req.GetNode().GetNodeId())
+	if nodeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "node.node_id is required")
+	}
+
+	removed := s.peerStore.Remove(nodeID)
+	return &apiv1.GossipSyncResponse{
+		Accepted:       removed,
+		ReceivedAtUnix: s.now().Unix(),
+	}, nil
+}
+
 func (s *RegistryPeerServer) PullState(_ context.Context, req *apiv1.PullStateRequest) (*apiv1.PullStateResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request is required")

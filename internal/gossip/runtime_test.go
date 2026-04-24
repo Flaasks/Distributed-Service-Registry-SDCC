@@ -115,6 +115,41 @@ func TestRuntimeBootstrapGossipAndReconcile(t *testing.T) {
 	}
 }
 
+func TestRuntimeGracefulLeaveRemovesLocalPeer(t *testing.T) {
+	remoteAddress, _, remotePeerStore, stopRemote := startPeerServer(t, "node-remote")
+	defer stopRemote()
+
+	localServices := storage.NewServiceStore()
+	localPeers := storage.NewPeerStore()
+	cfg := &config.RegistryConfig{
+		Node: config.RegistryNodeConfig{
+			ID:               "node-local",
+			AdvertiseAddress: "node-local:50051",
+		},
+		Cluster: config.RegistryClusterConfig{
+			SeedPeers:                []string{remoteAddress},
+			GossipIntervalSeconds:    1,
+			ReconcileIntervalSeconds: 1,
+			PeerTimeoutSeconds:       2,
+			MaxGossipFanout:          1,
+		},
+	}
+
+	runtime := NewRuntime(cfg, localServices, localPeers)
+	runtime.Start()
+	t.Cleanup(runtime.Stop)
+
+	waitForCondition(t, 3*time.Second, func() bool {
+		return containsPeer(remotePeerStore.List(), "node-local")
+	})
+
+	runtime.GracefulLeave()
+
+	waitForCondition(t, 3*time.Second, func() bool {
+		return !containsPeer(remotePeerStore.List(), "node-local")
+	})
+}
+
 func startPeerServer(t *testing.T, nodeID string) (address string, serviceStore *storage.ServiceStore, peerStore *storage.PeerStore, stop func()) {
 	t.Helper()
 
@@ -131,6 +166,7 @@ func startPeerServer(t *testing.T, nodeID string) (address string, serviceStore 
 	grpcServer := grpc.NewServer()
 	peerServer := registry.NewRegistryPeerServer(serviceStore, peerStore, nodeID, address)
 	apiv1.RegisterRegistryPeerServer(grpcServer, peerServer)
+	registry.RegisterRegistryPeerControlServer(grpcServer, peerServer)
 
 	go func() {
 		_ = grpcServer.Serve(listener)
@@ -143,9 +179,30 @@ func startPeerServer(t *testing.T, nodeID string) (address string, serviceStore 
 	return address, serviceStore, peerStore, stop
 }
 
+func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for condition")
+}
+
 func containsService(records []*apiv1.ServiceRecord, name, id string) bool {
 	for _, record := range records {
 		if record.GetServiceName() == name && record.GetServiceId() == id {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPeer(peers []*apiv1.NodeInfo, nodeID string) bool {
+	for _, peer := range peers {
+		if peer.GetNodeId() == nodeID {
 			return true
 		}
 	}

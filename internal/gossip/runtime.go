@@ -2,6 +2,7 @@ package gossip
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/Flaasks/distributed-service-registry/internal/config"
+	"github.com/Flaasks/distributed-service-registry/internal/registry"
 	"github.com/Flaasks/distributed-service-registry/internal/storage"
 	apiv1 "github.com/Flaasks/distributed-service-registry/pkg/api"
 )
@@ -248,6 +250,80 @@ func (r *Runtime) runReconcileRound() {
 		r.lastReconcileUnix.Store(time.Now().Unix())
 		return
 	}
+}
+
+func (r *Runtime) GracefulLeave() {
+	request := &apiv1.JoinClusterRequest{
+		Node: &apiv1.NodeInfo{
+			NodeId:        r.nodeID,
+			GrpcAddress:   r.advertiseAddress,
+			UpdatedAtUnix: time.Now().Unix(),
+		},
+	}
+
+	for _, address := range r.leaveTargets() {
+		if err := r.leaveCluster(address, request); err != nil {
+			log.Printf("graceful leave failed for %s: %v", address, err)
+		}
+	}
+	_ = r.peerStore.Remove(r.nodeID)
+}
+
+func (r *Runtime) leaveTargets() []string {
+	targets := make([]string, 0)
+	seen := make(map[string]struct{})
+
+	for _, peer := range r.peerStore.List() {
+		address := strings.TrimSpace(peer.GetGrpcAddress())
+		if address == "" || peer.GetNodeId() == r.nodeID {
+			continue
+		}
+		if _, exists := seen[address]; exists {
+			continue
+		}
+		seen[address] = struct{}{}
+		targets = append(targets, address)
+	}
+
+	for _, seedAddress := range r.seedPeers {
+		address := strings.TrimSpace(seedAddress)
+		if address == "" || address == r.advertiseAddress {
+			continue
+		}
+		if _, exists := seen[address]; exists {
+			continue
+		}
+		seen[address] = struct{}{}
+		targets = append(targets, address)
+	}
+
+	return targets
+}
+
+func (r *Runtime) leaveCluster(address string, request *apiv1.JoinClusterRequest) error {
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), r.dialTimeout)
+	conn, err := grpc.DialContext(dialCtx, address, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+	dialCancel()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			log.Printf("peer connection close error for %s: %v", address, closeErr)
+		}
+	}()
+
+	callCtx, callCancel := context.WithTimeout(context.Background(), r.dialTimeout)
+	defer callCancel()
+
+	response := new(apiv1.GossipSyncResponse)
+	if err := conn.Invoke(callCtx, registry.RegistryPeerControl_LeaveCluster_FullMethodName, request, response); err != nil {
+		return err
+	}
+	if !response.GetAccepted() {
+		return fmt.Errorf("leave rejected by %s", address)
+	}
+	return nil
 }
 
 func (r *Runtime) sendGossip(address string, request *apiv1.GossipSyncRequest) error {

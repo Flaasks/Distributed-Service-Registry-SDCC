@@ -77,6 +77,22 @@ func (s *PeerStore) MergeRemote(peers []*apiv1.NodeInfo) int {
 	return updated
 }
 
+func (s *PeerStore) Remove(nodeID string) bool {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return false
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.peers[nodeID]; !exists {
+		return false
+	}
+	delete(s.peers, nodeID)
+	return true
+}
+
 func (s *PeerStore) List() []*apiv1.NodeInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
